@@ -71,24 +71,27 @@ def kw2Jd():
     G = nx.MultiDiGraph()
     Postings = ExtractPostings(MainSearch("vmware"))
 #     G.add_node("VMWare", weight=8, color="b")
+    freqs["vmware"] = freqs.get("vmware", 0) + 1
     url2desc = {}
     data = []
     for key in Postings.keys():
         url2desc[key] = ExtractText(GetSoup(key))
         data.append(("VMware", Postings[key]))
         G.add_edge("VMware", Postings[key], alpha=0)
+        freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
         for line in url2desc[key]:
-            for word in line.split():
+            for word in line.lower().split():
                 # fetch and increment OR initialize
                 freqs[word] = freqs.get(word, 0) + 1
-            if len(line) < 8 and len(line) > 2:
-                if re.match('\D', line):  # Weed out numerics
-                    if not re.match('\W', line):  # Weed out non-alphanumerics
-                        if line.upper() not in exclusions:
-                            print(line)
-                            data.append((Postings[key], line))
-                            G.add_edge(Postings[key], line)
-    print(url2desc)
+                if freqs[word] > 2:
+                    if len(word) < 8 and len(word) > 2:
+                        if re.match('\D', word):  # Weed out numerics
+                            # Weed out non-alphanumerics
+                            if not re.match('\W', word):
+                                if word.upper() not in exclusions:
+                                    data.append((Postings[key], word))
+                                    G.add_edge(Postings[key], word)
+
     return G
 
 
@@ -103,22 +106,28 @@ def Main():
     plt.figure(figsize=(8, 8))
     plt.title("PZ", font)
     plt.axis('off')
-    plt.text(0.5, 1, "VMware",
+    plt.text(0.5, .95, "VMware",
              horizontalalignment='center', transform=plt.gca().transAxes)
-
     try:
         pos = nx.graphviz_layout(H)
     except:
         pos = nx.spring_layout(H, iterations=20)
-    print(pos)
+#     print(pos)
     nx.draw_networkx_edges(
         H, pos, alpha=0.2, node_size=0, width=2, edge_color='k')
-    nx.draw_networkx_nodes(
-        H, pos, node_color='w', alpha=0.4)
+    nx.draw_networkx_nodes(H, pos, node_color='b', alpha=0.4)
 
     nx.draw_networkx_labels(H, pos, fontsize=12)
 
-# nx.draw(H)  # Messes up
+    for n in H.nodes(data=True):
+        n[1]['node_color'] = 'g'
+#         if n[0].lower() != 'vmware':
+#             print(n)
+#         else:
+#             n[1]['node_color'] = 'g'
+#     nodesize = [freqs[v, 0] for v in H]
+#     print(nodesize)
+# nx.draw(H)  # Messes up everything
     plt.savefig("pz-networkx.png", dpi=75)
     plt.show()
 
