@@ -20,7 +20,7 @@ def visible(element):
     return True
 
 
-def MainSearch(keyword, base="http://seeker.dice.com", tail="/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=4&FREE_TEXT="):
+def MainSearch(keyword, base="http://seeker.dice.com", tail="/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=3&FREE_TEXT="):
     """
     Get job listings from main keyword search and returns bs
     """
@@ -65,44 +65,66 @@ def ExtractText(soup, base="http://seeker.dice.com"):
     return texts
 
 
-def Main():
+def kw2Jd():
+    fExclusions = "C:\\Workdir\\pZuikov\\r\\exclusions.txt"
+    exclusions = [line.strip() for line in open(fExclusions)]
     G = nx.MultiDiGraph()
     Postings = ExtractPostings(MainSearch("vmware"))
-#    G.add_node("VMWare", name="VMware")
+#     G.add_node("VMWare", weight=8, color="b")
     url2desc = {}
+    data = []
     for key in Postings.keys():
         url2desc[key] = ExtractText(GetSoup(key))
-#        G.add_node(Postings[key], name=url2desc[key])
-#        G.add_edge("VMware", Postings[key], name=url2desc[key])
-    G.add_nodes_from(Postings.values())
+        data.append(("VMware", Postings[key]))
+        G.add_edge("VMware", Postings[key], alpha=0)
+        for line in url2desc[key]:
+            for word in line.split():
+                # fetch and increment OR initialize
+                freqs[word] = freqs.get(word, 0) + 1
+            if len(line) < 8 and len(line) > 2:
+                if re.match('\D', line):  # Weed out numerics
+                    if not re.match('\W', line):  # Weed out non-alphanumerics
+                        if line.upper() not in exclusions:
+                            print(line)
+                            data.append((Postings[key], line))
+                            G.add_edge(Postings[key], line)
     print(url2desc)
+    return G
 
+
+def Main():
+    G = kw2Jd()
     H = nx.Graph(G)
+    font = {'fontname': 'Arial',
+            'color': 'k',
+            'fontweight': 'bold',
+            'fontsize': 14}
     plt.rcParams['text.usetex'] = False
     plt.figure(figsize=(8, 8))
+    plt.title("PZ", font)
+    plt.axis('off')
+    plt.text(0.5, 1, "VMware",
+             horizontalalignment='center', transform=plt.gca().transAxes)
 
     try:
         pos = nx.graphviz_layout(H)
     except:
         pos = nx.spring_layout(H, iterations=20)
+    print(pos)
+    nx.draw_networkx_edges(
+        H, pos, alpha=0.2, node_size=0, width=2, edge_color='k')
+    nx.draw_networkx_nodes(
+        H, pos, node_color='w', alpha=0.4)
+
     nx.draw_networkx_labels(H, pos, fontsize=12)
 
-    plt.axis('off')
-    plt.text(0.5, 0.97, "VMware",
-             horizontalalignment='center', transform=plt.gca().transAxes)
-
-    font = {'fontname': 'Arial',
-            'color': 'k',
-            'fontweight': 'bold',
-            'fontsize': 14}
-
-    plt.title("PZ", font)
-    nx.draw(G)
+# nx.draw(H)  # Messes up
     plt.savefig("pz-networkx.png", dpi=75)
     plt.show()
-    return G
 
 
 if __name__ == '__main__':
+
+    freqs = {}
     Main()
     print(" ")
