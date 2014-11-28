@@ -20,7 +20,7 @@ def visible(element):
     return True
 
 
-def MainSearch(keyword, base="http://seeker.dice.com", tail="/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=3&FREE_TEXT="):
+def MainSearch(keyword, base="http://seeker.dice.com", tail="/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=5&FREE_TEXT="):
     """
     Get job listings from main keyword search and returns bs
     """
@@ -69,21 +69,25 @@ def kw2Jd():
     fExclusions = "C:\\Workdir\\pZuikov\\r\\exclusions.txt"
     exclusions = [line.strip() for line in open(fExclusions)]
     G = nx.MultiDiGraph()
-    Postings = ExtractPostings(MainSearch("vmware"))
+    tail = "/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=" + \
+        str(results) + "&FREE_TEXT="
+    Postings = ExtractPostings(MainSearch("vmware", tail=tail))
 #     G.add_node("VMWare", weight=8, color="b")
     freqs["vmware"] = freqs.get("vmware", 0) + 1
     url2desc = {}
     data = []
     for key in Postings.keys():
         url2desc[key] = ExtractText(GetSoup(key))
-        data.append(("VMware", Postings[key]))
-        G.add_edge("VMware", Postings[key], alpha=0)
+        data.append(("vmware", Postings[key]))
+        G.add_edge("vmware", Postings[key], alpha=0)
         freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
+
         for line in url2desc[key]:
-            for word in line.lower().split():
+            for word in re.split('[ :,.]', line.lower()):
                 # fetch and increment OR initialize
                 freqs[word] = freqs.get(word, 0) + 1
-                if freqs[word] > 2:
+
+                if freqs[word] > results and freqs[word] < 2 * results:
                     if len(word) < 8 and len(word) > 2:
                         if re.match('\D', word):  # Weed out numerics
                             # Weed out non-alphanumerics
@@ -112,19 +116,36 @@ def Main():
         pos = nx.graphviz_layout(H)
     except:
         pos = nx.spring_layout(H, iterations=20)
-#     print(pos)
-    nx.draw_networkx_edges(
-        H, pos, alpha=0.2, node_size=0, width=2, edge_color='k')
-    nx.draw_networkx_nodes(H, pos, node_color='b', alpha=0.4)
 
+    print(pos)
+    nx.draw_networkx_edges(
+        H, pos, alpha=0.1, node_size=0, width=2, edge_color='w')
     nx.draw_networkx_labels(H, pos, fontsize=12)
 
-    for n in H.nodes(data=True):
-        n[1]['node_color'] = 'g'
-#         if n[0].lower() != 'vmware':
-#             print(n)
+    sampleFreq = dict.fromkeys(G.nodes(), 0.0)
+    for (u, v, d) in G.edges(data=True):
+        sampleFreq[u] += 1.0
+        sampleFreq[v] += 4.0
+#         r = d['freqs']
+#         if r[0] == '1':
+#             wins[u] += 1.0
+#         elif r[0] == '1/2':
+#             wins[u] += 0.5
+#             wins[v] += 0.5
 #         else:
-#             n[1]['node_color'] = 'g'
+#             wins[v] += 1.0
+    nodesize = [sampleFreq[v] * 50 for v in H]
+
+    nodes = H.nodes()
+    blue = nodes.pop()
+
+    nx.draw_networkx_nodes(H, pos, nodelist=[blue], node_color='b', alpha=.5)
+    nx.draw_networkx_nodes(
+        H, pos, nodelist=nodes, node_color='w', alpha=.2, node_size=nodesize)
+#     for i in H.nodes_iter(data=True):
+#         H.nodes[i]['freqs'] = freqs[i][0]
+#         print(i)
+
 #     nodesize = [freqs[v, 0] for v in H]
 #     print(nodesize)
 # nx.draw(H)  # Messes up everything
@@ -133,7 +154,7 @@ def Main():
 
 
 if __name__ == '__main__':
-
+    results = 4
     freqs = {}
     Main()
     print(" ")
