@@ -9,7 +9,6 @@ import urllib.request
 import re
 import networkx as nx
 import matplotlib.pyplot as plt
-from _ctypes import Array
 
 
 def visible(element):
@@ -65,42 +64,47 @@ def ExtractText(soup, base="http://seeker.dice.com"):
     return texts
 
 
-def kw2Jd():
-    fExclusions = "C:\\Workdir\\pZuikov\\r\\exclusions.txt"
-    exclusions = [line.strip() for line in open(fExclusions)]
+def kw2Jd(searchterm):
+    exclusions = [line.upper().strip() for line in open(fExclusions)]
+    sresume = " ".join([line.lower().strip() for line in open(fResume)])
     G = nx.MultiDiGraph()
     tail = "/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=" + \
         str(results) + "&FREE_TEXT="
-    Postings = ExtractPostings(MainSearch("vmware", tail=tail))
-#     G.add_node("VMWare", weight=8, color="b")
-    freqs["vmware"] = freqs.get("vmware", 0) + 1
+
+    Postings = ExtractPostings(MainSearch(searchterm, tail=tail))
+    freqs[searchterm] = freqs.get(searchterm, 0) + 1
     url2desc = {}
     data = []
     for key in Postings.keys():
         url2desc[key] = ExtractText(GetSoup(key))
-        data.append(("vmware", Postings[key]))
-        G.add_edge("vmware", Postings[key], alpha=0)
+        data.append((searchterm, Postings[key]))
+        G.add_edge(searchterm, Postings[key], alpha=0)
         freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
 
         for line in url2desc[key]:
-            for word in re.split('[ :,.]', line.lower()):
-                # fetch and increment OR initialize
-                freqs[word] = freqs.get(word, 0) + 1
-
-                if freqs[word] > results and freqs[word] < 2 * results:
-                    if len(word) < 8 and len(word) > 2:
-                        if re.match('\D', word):  # Weed out numerics
-                            # Weed out non-alphanumerics
-                            if not re.match('\W', word):
-                                if word.upper() not in exclusions:
-                                    data.append((Postings[key], word))
-                                    G.add_edge(Postings[key], word)
+            for word in re.split('[ :,.!?\)\(/]', line.lower()):
+                if len(word) < 18 and len(word) > 2:
+                    if re.match('\D', word):  # Weed out numerics
+                        # Weed out non-alphanumerics
+                        if not re.match('\W', word):
+                            if word.upper() not in exclusions:
+                                if word.lower() not in sresume:
+                                    # fetch and increment OR initialize
+                                    freqs[word] = freqs.get(word, 0) + 1
+    for word in freqs.keys():
+        print(word, freqs[word])
+        if freqs[word] > results * .2 and freqs[word] < 4 * results:
+            for key in Postings.keys():
+                if word in " ".join(url2desc[key]):
+                    data.append((Postings[key], word))
+                    G.add_edge(Postings[key], word)
 
     return G
 
 
 def Main():
-    G = kw2Jd()
+    searchterm = "vmware"
+    G = kw2Jd(searchterm)
     H = nx.Graph(G)
     font = {'fontname': 'Arial',
             'color': 'k',
@@ -110,7 +114,7 @@ def Main():
     plt.figure(figsize=(8, 8))
     plt.title("PZ", font)
     plt.axis('off')
-    plt.text(0.5, .95, "VMware",
+    plt.text(0.5, .95, searchterm,
              horizontalalignment='center', transform=plt.gca().transAxes)
     try:
         pos = nx.graphviz_layout(H)
@@ -124,37 +128,29 @@ def Main():
 
     sampleFreq = dict.fromkeys(G.nodes(), 0.0)
     for (u, v, d) in G.edges(data=True):
-        sampleFreq[u] += 1.0
+        sampleFreq[u] += .0
         sampleFreq[v] += 4.0
-#         r = d['freqs']
-#         if r[0] == '1':
-#             wins[u] += 1.0
-#         elif r[0] == '1/2':
-#             wins[u] += 0.5
-#             wins[v] += 0.5
-#         else:
-#             wins[v] += 1.0
     nodesize = [sampleFreq[v] * 50 for v in H]
 
+    alphas = [freqs.get(v, 0) for v in H]
+
+    print(nodesize)
+    print(alphas)
     nodes = H.nodes()
-    blue = nodes.pop()
 
-    nx.draw_networkx_nodes(H, pos, nodelist=[blue], node_color='b', alpha=.5)
-    nx.draw_networkx_nodes(
-        H, pos, nodelist=nodes, node_color='w', alpha=.2, node_size=nodesize)
-#     for i in H.nodes_iter(data=True):
-#         H.nodes[i]['freqs'] = freqs[i][0]
-#         print(i)
+    nx.draw_networkx_nodes(H, pos, nodelist=nodes, node_size=nodesize,
+                           cmap=plt.get_cmap('jet'), vmin=0, vmax=max(alphas), node_color=alphas)
 
-#     nodesize = [freqs[v, 0] for v in H]
-#     print(nodesize)
 # nx.draw(H)  # Messes up everything
     plt.savefig("pz-networkx.png", dpi=75)
     plt.show()
 
 
 if __name__ == '__main__':
-    results = 4
+    results = 50
+    fExclusions = "C:\\Workdir\\pZuikov\\r\\exclusions.txt"
+    fResume = "C:\\Workdir\\pZuikov\\r\\pz.txt"
+
     freqs = {}
     Main()
     print(" ")
