@@ -12,14 +12,6 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 
-def visible(element):
-    if element.parent.name in ['style', 'script', '[document]', 'head', 'title']:
-        return False
-    elif re.match('<!--.*-->', str(element)):
-        return False
-    return True
-
-
 def MainSearch(keyword, base="http://seeker.dice.com", tail="/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=5&FREE_TEXT="):
     """
     Get job listings from main keyword search and returns bs
@@ -71,10 +63,11 @@ def ExtractText(soup, base="http://seeker.dice.com"):
 def ExtractSalary(word):
     soup = GetSoup("http://www.indeed.com/salary?q1=" + word)
     try:
-        for sal in soup.find_all('span', 'salary'):
-            s = int(sal.text.replace('$', '').replace(',', '')) / 1000
+        t = soup.find('span', 'salary')
+        s = int(t.text.replace('$', '').replace(',', '')) / 1000
     except:
         s = 0
+    salary[word] = s
     return s
 
 
@@ -85,6 +78,7 @@ def ExtractSupply(word):
         s = int(s.text.strip().split()[0].replace(',', ''))
     except:
         s = 10000
+    supply[word] = s
     return s
 
 
@@ -96,6 +90,7 @@ def ExtractOpenings(word):
             soup.find('div', {'id': 'searchResHD'}).contents[1].text.split()[-1])
     except:
         s = 0
+    openings[word] = s
     return s
 
 
@@ -108,6 +103,7 @@ def ExtractTrend(word):
             t = -t
     except:
         t = 0
+    trends[word] = t
     return t
 
 
@@ -125,15 +121,13 @@ def kw2Jd(searchterm):
     openings[searchterm] = ExtractOpenings(searchterm)
     trends[searchterm] = ExtractTrend(searchterm)
     url2desc = {}
-    data = []
     for key in Postings.keys():
         url2desc[key] = ExtractText(GetSoup(key))
-        data.append((searchterm, Postings[key]))
         G.add_edge(Postings[key], searchterm, alpha=0)
         freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
 
         for line in url2desc[key]:
-            for word in re.split('[ :,.!?\)\(/@#%&*;"=\-\+\$]', line.lower()):
+            for word in re.split('[\s :,.!?\)\(/@#%&*;"=\-\+\$'']', line.lower()):
                 if len(word) < 18 and len(word) > 2:
                     if re.match('\D', word):  # Weed out numerics
                         # Weed out non-alphanumerics
@@ -143,21 +137,38 @@ def kw2Jd(searchterm):
                                     # fetch and increment OR initialize
                                     freqs[word] = freqs.get(word, 0) + 1
     for word in freqs.keys():
-        print(word, freqs[word])
+        #         print(word, freqs[word])
         if freqs[word] > results * .2 + 1 and freqs[word] < 4 * results:
             for key in Postings.keys():
                 if word in " ".join(url2desc[key]):
-                    data.append((Postings[key], word))
                     G.add_edge(Postings[key], word, weight=10 * freqs[word])
-                    salary[word] = ExtractSalary(word)
-                    supply[word] = ExtractSupply(word)
-                    openings[word] = ExtractOpenings(word)
-                    trends[word] = ExtractTrend(word)
+
+            threads = []
+            t = Thread(target=ExtractSalary, args=(word,))
+            t.start()
+            threads.append(t)
+
+            t = Thread(target=ExtractSupply, args=(word,))
+            t.start()
+            threads.append(t)
+
+            t = Thread(target=ExtractOpenings, args=(word,))
+            t.start()
+            threads.append(t)
+
+            t = Thread(target=ExtractTrend, args=(word,))
+            t.start()
+            threads.append(t)
+
+            # join all threads
+            for t in threads:
+                t.join()
+            print(word.upper())
     return G
 
 
 def Main():
-    searchterm = "VCLOUD"
+    searchterm = "VMWARE"
     G = kw2Jd(searchterm)
     H = nx.Graph(G)
     font = {'fontname': 'Arial',
@@ -191,9 +202,10 @@ def Main():
         (abs(trends.get(v, 0)) - trends.get(v, 10000)) / 10 for v in H]
     nodes = H.nodes()
 
-    nx.draw_networkx_nodes(H, pos, nodelist=nodes, node_size=nodesize, linewidths=linewidths,
-                           cmap=plt.get_cmap('jet'), vmin=0, vmax=2 * max(colorcoding), node_color=colorcoding)
-
+    nx.draw_networkx_nodes(H, pos, nodelist=nodes, node_size=nodesize, linewidths=linewidths, cmap=plt.cm.Blues, vmin=min(
+        colorcoding) / 2, vmax=max(colorcoding), node_color=colorcoding)
+#     print(colorcoding)
+    print(min(colorcoding), max(colorcoding))
     plt.savefig("pz-networkx.png", dpi=75)
     plt.show()
 
