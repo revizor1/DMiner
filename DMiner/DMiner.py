@@ -5,6 +5,7 @@ Created on Nov 27, 2014
 '''
 
 from bs4 import BeautifulSoup as bs4
+from threading import Thread
 import urllib.request
 import re
 import networkx as nx
@@ -33,9 +34,12 @@ def GetSoup(url):
     """
     Get job listings from main keyword search and returns bs
     """
-    resp = urllib.request.urlopen(url)
-    soup = bs4(resp.read(), from_encoding=resp.info().get_param('charset'))
-    return soup
+    try:
+        resp = urllib.request.urlopen(url)
+        soup = bs4(resp.read(), from_encoding=resp.info().get_param('charset'))
+        return soup
+    except:
+        return
 
 
 def ExtractPostings(soup, base="http://seeker.dice.com"):
@@ -64,6 +68,49 @@ def ExtractText(soup, base="http://seeker.dice.com"):
     return texts
 
 
+def ExtractSalary(word):
+    soup = GetSoup("http://www.indeed.com/salary?q1=" + word)
+    try:
+        for sal in soup.find_all('span', 'salary'):
+            s = int(sal.text.replace('$', '').replace(',', '')) / 1000
+    except:
+        s = 0
+    return s
+
+
+def ExtractSupply(word):
+    soup = GetSoup("http://www.indeed.com/resumes?q=" + word)
+    try:
+        s = soup.find('div', {'id': 'result_count'})
+        s = int(s.text.strip().split()[0].replace(',', ''))
+    except:
+        s = 10000
+    return s
+
+
+def ExtractOpenings(word):
+    soup = GetSoup(
+        "http://seeker.dice.com/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=1&FREE_TEXT=" + word)
+    try:
+        s = int(
+            soup.find('div', {'id': 'searchResHD'}).contents[1].text.split()[-1])
+    except:
+        s = 0
+    return s
+
+
+def ExtractTrend(word):
+    soup = GetSoup("http://www.simplyhired.com/a/jobtrends/trend/q-" + word)
+    try:
+        s = soup.find('li', 'trends_stats')
+        t = int(s.contents[1].strip().split()[-1].replace('%', ''))
+        if 'decreased' in s.contents[1].strip().split():
+            t = -t
+    except:
+        t = 0
+    return t
+
+
 def kw2Jd(searchterm):
     exclusions = [line.upper().strip() for line in open(fExclusions)]
     sresume = " ".join([line.lower().strip() for line in open(fResume)])
@@ -73,16 +120,20 @@ def kw2Jd(searchterm):
 
     Postings = ExtractPostings(MainSearch(searchterm, tail=tail))
     freqs[searchterm] = freqs.get(searchterm, 0) + 1
+    salary[searchterm] = ExtractSalary(searchterm)
+    supply[searchterm] = ExtractSupply(searchterm)
+    openings[searchterm] = ExtractOpenings(searchterm)
+    trends[searchterm] = ExtractTrend(searchterm)
     url2desc = {}
     data = []
     for key in Postings.keys():
         url2desc[key] = ExtractText(GetSoup(key))
         data.append((searchterm, Postings[key]))
-        G.add_edge(searchterm, Postings[key], alpha=0)
+        G.add_edge(Postings[key], searchterm, alpha=0)
         freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
 
         for line in url2desc[key]:
-            for word in re.split('[ :,.!?\)\(/]', line.lower()):
+            for word in re.split('[ :,.!?\)\(/@#%&*;"=\-\+\$]', line.lower()):
                 if len(word) < 18 and len(word) > 2:
                     if re.match('\D', word):  # Weed out numerics
                         # Weed out non-alphanumerics
@@ -93,17 +144,20 @@ def kw2Jd(searchterm):
                                     freqs[word] = freqs.get(word, 0) + 1
     for word in freqs.keys():
         print(word, freqs[word])
-        if freqs[word] > results * .2 and freqs[word] < 4 * results:
+        if freqs[word] > results * .2 + 1 and freqs[word] < 4 * results:
             for key in Postings.keys():
                 if word in " ".join(url2desc[key]):
                     data.append((Postings[key], word))
-                    G.add_edge(Postings[key], word)
-
+                    G.add_edge(Postings[key], word, weight=10 * freqs[word])
+                    salary[word] = ExtractSalary(word)
+                    supply[word] = ExtractSupply(word)
+                    openings[word] = ExtractOpenings(word)
+                    trends[word] = ExtractTrend(word)
     return G
 
 
 def Main():
-    searchterm = "vmware"
+    searchterm = "VCLOUD"
     G = kw2Jd(searchterm)
     H = nx.Graph(G)
     font = {'fontname': 'Arial',
@@ -116,41 +170,42 @@ def Main():
     plt.axis('off')
     plt.text(0.5, .95, searchterm,
              horizontalalignment='center', transform=plt.gca().transAxes)
+#     ax = plt.axes([0, 0, 1, 1])
     try:
         pos = nx.graphviz_layout(H)
     except:
         pos = nx.spring_layout(H, iterations=20)
 
-    print(pos)
     nx.draw_networkx_edges(
-        H, pos, alpha=0.1, node_size=0, width=2, edge_color='w')
+        H, pos, alpha=0.1, node_size=0, edge_color='w', width=3)
     nx.draw_networkx_labels(H, pos, fontsize=12)
 
     sampleFreq = dict.fromkeys(G.nodes(), 0.0)
     for (u, v, d) in G.edges(data=True):
-        sampleFreq[u] += .0
+        sampleFreq[u] = .001
         sampleFreq[v] += 4.0
-    nodesize = [sampleFreq[v] * 50 for v in H]
+    nodesize = [salary.get(v, 0) ** 2 for v in H]
 
-    alphas = [freqs.get(v, 0) for v in H]
-
-    print(nodesize)
-    print(alphas)
+    colorcoding = [openings.get(v, 0) / supply.get(v, 10000) for v in H]
+    linewidths = [
+        (abs(trends.get(v, 0)) - trends.get(v, 10000)) / 10 for v in H]
     nodes = H.nodes()
 
-    nx.draw_networkx_nodes(H, pos, nodelist=nodes, node_size=nodesize,
-                           cmap=plt.get_cmap('jet'), vmin=0, vmax=max(alphas), node_color=alphas)
+    nx.draw_networkx_nodes(H, pos, nodelist=nodes, node_size=nodesize, linewidths=linewidths,
+                           cmap=plt.get_cmap('jet'), vmin=0, vmax=2 * max(colorcoding), node_color=colorcoding)
 
-# nx.draw(H)  # Messes up everything
     plt.savefig("pz-networkx.png", dpi=75)
     plt.show()
 
 
 if __name__ == '__main__':
-    results = 50
+    results = 20
     fExclusions = "C:\\Workdir\\pZuikov\\r\\exclusions.txt"
     fResume = "C:\\Workdir\\pZuikov\\r\\pz.txt"
 
     freqs = {}
+    supply = {}
+    openings = {}
+    trends = {}
+    salary = {}
     Main()
-    print(" ")
