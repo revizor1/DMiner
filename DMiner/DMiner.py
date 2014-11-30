@@ -89,7 +89,7 @@ def ExtractOpenings(word):
         s = int(
             soup.find('div', {'id': 'searchResHD'}).contents[1].text.split()[-1])
     except:
-        s = 0
+        s = 1
     openings[word] = s
     return s
 
@@ -112,7 +112,7 @@ def kw2Jd(searchterm):
     sresume = " ".join([line.lower().strip() for line in open(fResume)])
     G = nx.MultiDiGraph()
     tail = "/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=" + \
-        str(results) + "&FREE_TEXT="
+        str(resultsMax) + "&FREE_TEXT="
 
     Postings = ExtractPostings(MainSearch(searchterm, tail=tail))
     freqs[searchterm] = freqs.get(searchterm, 0) + 1
@@ -121,13 +121,14 @@ def kw2Jd(searchterm):
     openings[searchterm] = ExtractOpenings(searchterm)
     trends[searchterm] = ExtractTrend(searchterm)
     url2desc = {}
+
+    resultsCount = len(Postings)
     for key in Postings.keys():
         url2desc[key] = ExtractText(GetSoup(key))
-        G.add_edge(Postings[key], searchterm, alpha=0)
         freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
 
         for line in url2desc[key]:
-            for word in re.split('[\s :,.!?\)\(/@#%&*;"=\-\+\$'']', line.lower()):
+            for word in re.split('[\s :,.!?\)\(/@#%&*;"=\-\+\$''_]', line.lower()):
                 if len(word) < 18 and len(word) > 2:
                     if re.match('\D', word):  # Weed out numerics
                         # Weed out non-alphanumerics
@@ -136,13 +137,14 @@ def kw2Jd(searchterm):
                                 if word.lower() not in sresume:
                                     # fetch and increment OR initialize
                                     freqs[word] = freqs.get(word, 0) + 1
+    fulltext = ""
+    for key in Postings.keys():
+        fulltext += " ".join(url2desc[key])
+#     print(fulltext)
+    words = []
+    j2w = []
     for word in freqs.keys():
-        #         print(word, freqs[word])
-        if freqs[word] > results * .2 + 1 and freqs[word] < 4 * results:
-            for key in Postings.keys():
-                if word in " ".join(url2desc[key]):
-                    G.add_edge(Postings[key], word, weight=10 * freqs[word])
-
+        if freqs[word] > resultsCount * .2 + 1 and freqs[word] < 4 * resultsCount:
             threads = []
             t = Thread(target=ExtractSalary, args=(word,))
             t.start()
@@ -160,15 +162,22 @@ def kw2Jd(searchterm):
             t.start()
             threads.append(t)
 
-            # join all threads
             for t in threads:
                 t.join()
-            print(word.upper())
+#            print(word.upper())
+
+            if salary[word] > 80:
+                for key in Postings.keys():
+                    if word in " ".join(url2desc[key]):
+                        #                        G.add_edge(Postings[key], word, weight=10 * freqs[word])
+                        words.append(word)
+                        j2w.append((Postings[key], word))
+    w = zip([searchterm for x in words], words)
+    G.add_edges_from(j2w)
     return G
 
 
 def Main():
-    searchterm = "VMWARE"
     G = kw2Jd(searchterm)
     H = nx.Graph(G)
     font = {'fontname': 'Arial',
@@ -181,7 +190,6 @@ def Main():
     plt.axis('off')
     plt.text(0.5, .95, searchterm,
              horizontalalignment='center', transform=plt.gca().transAxes)
-#     ax = plt.axes([0, 0, 1, 1])
     try:
         pos = nx.graphviz_layout(H)
     except:
@@ -191,27 +199,22 @@ def Main():
         H, pos, alpha=0.1, node_size=0, edge_color='w', width=3)
     nx.draw_networkx_labels(H, pos, fontsize=12)
 
-    sampleFreq = dict.fromkeys(G.nodes(), 0.0)
-    for (u, v, d) in G.edges(data=True):
-        sampleFreq[u] = .001
-        sampleFreq[v] += 4.0
     nodesize = [salary.get(v, 0) ** 2 for v in H]
 
-    colorcoding = [openings.get(v, 0) / supply.get(v, 10000) for v in H]
+    colorcoding = [supply.get(v, 10000) / openings.get(v, 1) for v in H]
     linewidths = [
         (abs(trends.get(v, 0)) - trends.get(v, 10000)) / 10 for v in H]
     nodes = H.nodes()
 
     nx.draw_networkx_nodes(H, pos, nodelist=nodes, node_size=nodesize, linewidths=linewidths, cmap=plt.cm.Blues, vmin=min(
-        colorcoding) / 2, vmax=max(colorcoding), node_color=colorcoding)
-#     print(colorcoding)
-    print(min(colorcoding), max(colorcoding))
+        colorcoding), vmax=100, node_color=colorcoding)
     plt.savefig("pz-networkx.png", dpi=75)
     plt.show()
 
 
 if __name__ == '__main__':
-    results = 20
+    searchterm = "NUMPY"
+    resultsCount = resultsMax = 50
     fExclusions = "C:\\Workdir\\pZuikov\\r\\exclusions.txt"
     fResume = "C:\\Workdir\\pZuikov\\r\\pz.txt"
 
