@@ -1,9 +1,3 @@
-'''
-Created on Nov 27, 2014
-
-@author: PZ
-'''
-
 from bs4 import BeautifulSoup as bs4
 from threading import Thread
 import urllib.request
@@ -32,32 +26,6 @@ def GetSoup(url):
         return soup
     except:
         return
-
-
-def ExtractPostings(soup, base="http://seeker.dice.com"):
-    """
-    Takes bs and returns dict{url:Title}
-    """
-    results = {}
-    for link in soup.find_all('a', href=True):
-        if "op=302&" in link['href']:
-            results[base + link.get('href').split('@')[0]] = link.text
-
-    return results
-
-
-def ExtractText(soup, base="http://seeker.dice.com"):
-    """
-    Get html and return visible text without all tags
-    """
-    texts = []
-    # kill all script and style elements
-    for script in soup(["script", "style", "input", "extjvbutton"]):
-        script.extract()    # rip it out
-
-    for string in soup.stripped_strings:
-        texts.append(string.replace(u'\xa0', u' ').replace('*', ''))
-    return texts
 
 
 def ExtractSalary(word):
@@ -107,9 +75,57 @@ def ExtractTrend(word):
     return t
 
 
+def ExtractPostings(soup, base="http://seeker.dice.com"):
+    """
+    Takes bs and returns dict{url:Title}
+    """
+    results = {}
+    for link in soup.find_all('a', href=True):
+        if "op=302&" in link['href']:
+            results[base + link.get('href').split('@')[0]] = link.text
+
+    return results
+
+
+def SanitizeText(string):
+    string = string.upper()
+    string = re.sub('[^A-Za-z0-9\\s\\.]+', ' ', string)
+    string = re.sub('\\b[\d]+\\b', ' ', string)
+    string = re.sub('\\b.{1,2}\\b', ' ', string)
+    string = clean_sentence(string)
+    return string
+
+
+def ExtractText(soup, base="http://seeker.dice.com"):
+    """
+    Get html and return visible text without all tags
+    """
+    texts = []
+    # kill all script and style elements
+    for script in soup(["script", "style", "input", "extjvbutton"]):
+        script.extract()    # rip it out
+
+    for string in soup.stripped_strings:
+        string = SanitizeText(string)
+        if string:
+            texts.append(string)
+    return texts
+
+
+def clean_sentence(text):
+    """
+    Returns a list of all words from the sentence.
+    """
+    text = text.split()
+    for word in text:
+        #         if word in exclusions or word in sresume.upper():
+        if word in exclusions:
+            text.remove(word)
+    x = " ".join(text)
+    return x
+
+
 def kw2Jd(searchterm):
-    exclusions = [line.upper().strip() for line in open(fExclusions)]
-    sresume = " ".join([line.lower().strip() for line in open(fResume)])
     G = nx.MultiDiGraph()
     tail = "/jobsearch/servlet/JobSearch?op=100&NUM_PER_PAGE=" + \
         str(resultsMax) + "&FREE_TEXT="
@@ -124,23 +140,32 @@ def kw2Jd(searchterm):
 
     resultsCount = len(Postings)
     for key in Postings.keys():
-        url2desc[key] = ExtractText(GetSoup(key))
-        freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
+        t = ExtractText(GetSoup(key))
+        if t:
+            url2desc[key] = t
+            freqs[Postings[key]] = freqs.get(Postings[key], 0) + 1
 
-        for line in url2desc[key]:
-            for word in re.split('[\s :,.!?\)\(/@#%&*;"=\-\+\$''_]', line.lower()):
-                if len(word) < 18 and len(word) > 2:
-                    if re.match('\D', word):  # Weed out numerics
-                        # Weed out non-alphanumerics
-                        if not re.match('\W', word):
-                            if word.upper() not in exclusions:
-                                if word.lower() not in sresume:
-                                    # fetch and increment OR initialize
-                                    freqs[word] = freqs.get(word, 0) + 1
+            for line in url2desc[key]:
+                for word in re.split('[\s :,.!?\)\(/@#%&*;"=\-\+\$''_]', line.upper()):
+                    if len(word) < 18 and len(word) > 2:
+                        freqs[word] = freqs.get(word, 0) + 1
+
+# for word in re.split('[\s :,.!?\)\(/@#%&*;"=\-\+\$''_]', line.lower()):
+#                     if len(word) < 18 and len(word) > 2:
+# if re.match('\D', word):  # Weed out numerics
+# Weed out non-alphanumerics
+#                             if not re.match('\W', word):
+#                                 if word.upper() not in exclusions:
+#                                     if word.lower() not in sresume:
+# fetch and increment OR initialize
+#                                         freqs[word] = freqs.get(word, 0) + 1
     fulltext = ""
     for key in Postings.keys():
         fulltext += " ".join(url2desc[key])
-#     print(fulltext)
+
+    output = open('{}'.format(fTxtOut), 'w')
+    output.write(fulltext)
+
     words = []
     j2w = []
     for word in freqs.keys():
@@ -201,7 +226,7 @@ def Main():
 
     nodesize = [salary.get(v, 0) ** 2 for v in H]
 
-    colorcoding = [supply.get(v, 10000) / openings.get(v, 1) for v in H]
+    colorcoding = [supply.get(v, 10000) / (openings.get(v, 1) + 1) for v in H]
     linewidths = [
         (abs(trends.get(v, 0)) - trends.get(v, 10000)) / 10 for v in H]
     nodes = H.nodes()
@@ -213,11 +238,18 @@ def Main():
 
 
 if __name__ == '__main__':
-    searchterm = "NUMPY"
+    searchterm = "HYPERCONVERGED"
     resultsCount = resultsMax = 50
+    fTxtOut = "C:\\temp\\tmp.txt"
     fExclusions = "C:\\Workdir\\pZuikov\\r\\exclusions.txt"
     fResume = "C:\\Workdir\\pZuikov\\r\\pz.txt"
+    exclusions = [line.upper().strip() for line in open(fExclusions)]
+#     sresume = " ".join([line.upper().strip() for line in open(fResume)])
+#     sresume = " ".join([SanitizeText(line) for line in open(fResume)])
+    sresume = (" ".join([SanitizeText(line)
+                         for line in open(fResume)])).split()
 
+    print(sresume)
     freqs = {}
     supply = {}
     openings = {}
